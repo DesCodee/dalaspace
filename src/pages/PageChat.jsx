@@ -1,9 +1,9 @@
-import { generateSmartChatReply } from "../utils/aiFallback";
 import { useState, useEffect, useRef } from "react";
 import { MessageCircle, Mic, Send, MicOff, Volume2 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
-import { AI_MODELS, resolveModel, API_KEY } from "../constants/config";
+import { AI_MODELS } from "../constants/config";
 import { RNAME } from "../constants/regions";
+import { askAiAssistant } from "../utils/aiService";
 
 function renderMd(text) {
   if (!text) return text;
@@ -22,7 +22,8 @@ function renderMd(text) {
 }
 const stripMd = text => (text||"").replace(/\*\*/g,"").replace(/\*/g,"").replace(/#{1,6}\s?/g,"").replace(/[_~`]/g,"");
 
-
+// По умолчанию Sonnet, если её нет в списке, то первая модель
+const DEFAULT_MODEL = (AI_MODELS.find(m => m.id.includes("sonnet")) || AI_MODELS[0]).id;
 
 export default function PageChat({ data, regions, selected, t, lang, userName }) {
   const { T } = useTheme();
@@ -31,7 +32,7 @@ export default function PageChat({ data, regions, selected, t, lang, userName })
   const [loading,   setLoading]   = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking,  setSpeaking]  = useState(false);
-  const [aiModel,   setAiModel]   = useState(AI_MODELS[0].id);
+  const [aiModel,   setAiModel]   = useState(DEFAULT_MODEL);
   const chatRef  = useRef(null);
   const recogRef = useRef(null);
 
@@ -52,19 +53,21 @@ export default function PageChat({ data, regions, selected, t, lang, userName })
     setMessages(prev=>[...prev,userMsg]);
     setInput(""); setLoading(true);
     try {
+      // Приветствие от ассистента в начале отбросится внутри askAiAssistant
       const history = [...messages,userMsg].slice(-12).map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:resolveModel(aiModel),max_tokens:800,system:buildContext(),messages:history}),
+      const reply = await askAiAssistant({
+        text: text.trim(),
+        history,
+        systemPrompt: buildContext(),
+        aiModel,
+        selected,
+        data,
+        lang,
       });
-      const json = await res.json();
-      const reply=(json.content?.[0]?.text||"...").replace(/\*\*/g,"").replace(/\*/g,"");
       setMessages(prev=>[...prev,{role:"assistant",text:reply}]);
     } catch(e) {
-      console.warn("Anthropic API error in chat, using smart context fallback:", e.message);
-      const reply = generateSmartChatReply(text, selected, data, lang);
-      setMessages(prev=>[...prev,{role:"assistant",text:reply}]);
+      console.error("Ошибка чата:", e.message);
+      setMessages(prev=>[...prev,{role:"assistant",text:"Не удалось получить ответ: "+e.message}]);
     }
     setLoading(false);
   };
@@ -121,7 +124,6 @@ export default function PageChat({ data, regions, selected, t, lang, userName })
       </div>
 
       <div style={{borderTop:`1px solid ${T.brd}`,paddingTop:8}}>
-        {/* Model selector */}
         <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap",alignItems:"center",overflowX:"auto",paddingBottom:2}}>
           <span style={{fontSize:10,color:T.dim,marginRight:2,flexShrink:0}}>AI:</span>
           {AI_MODELS.map(m => (
@@ -131,7 +133,6 @@ export default function PageChat({ data, regions, selected, t, lang, userName })
           ))}
         </div>
 
-        {/* Input row — FIX: ensure items don't overflow on mobile */}
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <button onClick={toggleVoice} style={{width:42,height:42,flexShrink:0,borderRadius:12,border:`1px solid ${listening?T.leaf:T.brd}`,background:listening?`${T.leaf}15`:T.controlBg,color:listening?T.leaf:T.sub,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",animation:listening?"blink 1s infinite":"none"}}>
             {listening?<MicOff size={18}/>:<Mic size={18}/>}

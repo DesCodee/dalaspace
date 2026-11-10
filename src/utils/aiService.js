@@ -66,11 +66,11 @@ export async function analyzeFieldImage({ b64, mimeType = "image/jpeg", coordInf
 Ответь СТРОГО в формате валидного JSON без markdown и без тройных кавычек:
 {
   "land_type": "Пашня / Пастбище / Залежь / Заброшенный участок",
-  "status": "active",
+  "status": "active / abandoned / degraded / recovering",
   "ndvi_estimate": 0.55,
   "moisture_estimate": 0.24,
   "vegetation_cover": 70,
-  "erosion_risk": "low",
+  "erosion_risk": "low / medium / high / critical",
   "soil_condition": "описание почвы",
   "crops_detected": "культуры или их отсутствие",
   "problems": ["проблема 1", "проблема 2"],
@@ -80,7 +80,8 @@ export async function analyzeFieldImage({ b64, mimeType = "image/jpeg", coordInf
   "season_estimate": "сезон",
   "irrigation_needed": false,
   "usability_score": 80
-}`;
+}
+В полях status и erosion_risk укажи ровно одно значение из перечисленных.`;
 
   try {
     const text = await callClaude({

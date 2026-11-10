@@ -1,10 +1,9 @@
-import { generateSimulatedAIAnalysis } from "../utils/aiFallback";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../contexts/ThemeContext";
-import { API_KEY } from "../constants/config";
 import { DATE_LOCALE } from "../constants/theme";
 import { ndviColor } from "../utils/styleUtils";
 import { formatHa } from "../utils/mapUtils";
+import { analyzeFieldImage } from "../utils/aiService";
 import Title from "../components/atoms/Title";
 import Panel from "../components/atoms/Panel";
 import Badge from "../components/atoms/Badge";
@@ -18,18 +17,18 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
   const [error,    setError]    = useState(null);
   const [history,  setHistory]  = useState([]);
   const [dragging, setDragging] = useState(false);
-  const inputRef   = useRef(null);
-  const autoRunRef = useRef(false);
-  const boundsRef  = useRef(null);
-  const hectaresRef= useRef(null);
+  const inputRef    = useRef(null);
+  const autoRunRef  = useRef(false);
+  const boundsRef   = useRef(null);
+  const hectaresRef = useRef(null);
 
   useEffect(() => {
     if (initialImage && !autoRunRef.current) {
       if (initialImage.preview?.startsWith("data:image") && initialImage.preview.length > 200) {
         setPreview(initialImage.preview);
-        setFile({ name:initialImage.name, type:"image/jpeg" });
-        boundsRef.current  = initialImage.bounds;
-        hectaresRef.current= initialImage.hectares||null;
+        setFile({ name: initialImage.name, type: "image/jpeg" });
+        boundsRef.current   = initialImage.bounds;
+        hectaresRef.current = initialImage.hectares || null;
         setResult(null); setError(null);
         autoRunRef.current = true;
       } else {
@@ -49,7 +48,7 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
 
   const pickFile = f => {
     if (!f?.type.startsWith("image/")) { setError("Нужно изображение: JPG, PNG, WEBP"); return; }
-    setFile(f); setResult(null); setError(null); boundsRef.current=null; hectaresRef.current=null;
+    setFile(f); setResult(null); setError(null); boundsRef.current = null; hectaresRef.current = null;
     const reader = new FileReader();
     reader.onload = e => setPreview(e.target.result);
     reader.readAsDataURL(f);
@@ -59,46 +58,37 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
     if (!preview) return;
     setLoading(true); setError(null); setResult(null);
     try {
-      if (!preview.startsWith("data:image")) throw new Error("Invalid image data");
-      const b64 = preview.split(",")[1];
-      if (!b64||b64.length<100) throw new Error("Image data too small");
-      const mt = file?.type||"image/jpeg";
-      const bounds = boundsRef.current; const ha = hectaresRef.current;
+      if (!preview.startsWith("data:image")) throw new Error("Некорректное изображение");
+      const [meta, b64] = preview.split(",");
+      if (!b64 || b64.length < 100) throw new Error("Изображение слишком маленькое");
+      const mimeType = meta.match(/data:(.*?);/)?.[1] || "image/jpeg";
+
+      const bounds = boundsRef.current;
+      const ha = hectaresRef.current;
       const coordInfo = bounds
-        ? `\nКоординаты: ЮЗ ${bounds.sw.lat.toFixed(3)}°N, ${bounds.sw.lng.toFixed(3)}°E — СВ ${bounds.ne.lat.toFixed(3)}°N, ${bounds.ne.lng.toFixed(3)}°E (Казахстан).${ha?` Площадь: ~${Math.round(ha)} га.`:""} Спутниковый снимок Esri.`
+        ? `\nКоординаты: ЮЗ ${bounds.sw.lat.toFixed(3)}°N, ${bounds.sw.lng.toFixed(3)}°E, СВ ${bounds.ne.lat.toFixed(3)}°N, ${bounds.ne.lng.toFixed(3)}°E (Казахстан).${ha ? ` Площадь: ~${Math.round(ha)} га.` : ""} Спутниковый снимок Esri.`
         : "";
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:1000,
-          messages:[{role:"user",content:[
-            {type:"image",source:{type:"base64",media_type:mt,data:b64}},
-            {type:"text",text:`Ты — агроаналитик DalaSpace. Проанализируй снимок земельного участка.${coordInfo}\nОтветь СТРОГО в JSON без markdown:\n{"land_type":"тип","status":"active/abandoned/degraded/recovering","ndvi_estimate":0.0,"moisture_estimate":0.0,"vegetation_cover":0,"erosion_risk":"low/medium/high/critical","soil_condition":"описание","crops_detected":"культуры или нет","problems":["проблема"],"recommendations":["совет"],"recovery_potential":0,"summary":"вывод 2-3 предложения","season_estimate":"сезон","irrigation_needed":true,"usability_score":0}`},
-          ]}],
-        }),
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error.message);
-      const text = (json.content||[]).map(i=>i.text||"").join("\n");
-      const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+      const parsed = await analyzeFieldImage({ b64, mimeType, coordInfo, lang, bounds, hectares: ha });
+
       setResult(parsed);
-      setHistory(h => [{id:Date.now(),preview,result:parsed,name:file?.name||"satellite.jpg",date:new Date().toLocaleString(DATE_LOCALE[lang] || DATE_LOCALE.ru),hectares:hectaresRef.current},...h].slice(0,8));
-    } catch(e) {
-      console.warn("Anthropic API error, using intelligent fallback analysis:", e.message);
-      const simulated = generateSimulatedAIAnalysis(boundsRef.current, hectaresRef.current, lang);
-      setResult(simulated);
-      setHistory(h => [{id:Date.now(),preview,result:simulated,name:file?.name||"satellite.jpg",date:new Date().toLocaleString(DATE_LOCALE[lang] || DATE_LOCALE.ru),hectares:hectaresRef.current},...h].slice(0,8));
+      setHistory(h => [{
+        id: Date.now(), preview, result: parsed,
+        name: file?.name || "satellite.jpg",
+        date: new Date().toLocaleString(DATE_LOCALE[lang] || DATE_LOCALE.ru),
+        hectares: ha,
+      }, ...h].slice(0, 8));
+    } catch (e) {
+      console.error("Ошибка анализа:", e.message);
+      setError("Не удалось выполнить анализ: " + e.message);
     }
     setLoading(false);
   };
 
-  const reset = () => { setFile(null); setPreview(null); setResult(null); setError(null); boundsRef.current=null; hectaresRef.current=null; };
+  const reset = () => { setFile(null); setPreview(null); setResult(null); setError(null); boundsRef.current = null; hectaresRef.current = null; };
 
   return (
     <div style={{display:"grid", gap:20}}>
-      {/* FIX: ai-main class uses CSS override for mobile */}
       <div className="ai-main" style={{display:"grid", gridTemplateColumns:result?"minmax(0,340px) minmax(0,1fr)":"minmax(0,420px) minmax(0,1fr)", gap:18}}>
         <div style={{display:"grid", gap:14, alignContent:"start"}}>
           <Panel>
@@ -137,7 +127,6 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
 
         {result ? (
           <div style={{display:"grid", gap:14, alignContent:"start"}}>
-            {/* Verdict banner */}
             <div className="ai-verdict" style={{background:T.card,border:`1px solid ${RISK_STYLE[result.erosion_risk]?.brd||T.brd}`,borderRadius:18,padding:"18px 22px",display:"grid",gridTemplateColumns:"1fr auto",gap:16,alignItems:"center"}}>
               <div>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
@@ -163,7 +152,6 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
               </div>
             </div>
 
-            {/* Metrics — FIX: 6-col desktop, 3-col mobile via CSS */}
             <div className="ai-metrics" style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
               {[
                 {label:"NDVI",val:result.ndvi_estimate?.toFixed(2),col:ndviColor(result.ndvi_estimate||0, T),icon:"◈",pct:(result.ndvi_estimate||0)*100},
@@ -181,7 +169,6 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
               ))}
             </div>
 
-            {/* Details — FIX: 3-col desktop, 1-col mobile via CSS */}
             <div className="ai-details" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
               <Panel style={{padding:16}}>
                 <Title>Детали участка</Title>
