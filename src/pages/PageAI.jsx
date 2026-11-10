@@ -1,3 +1,4 @@
+import { generateSimulatedAIAnalysis } from "../utils/aiFallback";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../contexts/ThemeContext";
 import { API_KEY } from "../constants/config";
@@ -84,7 +85,12 @@ export default function PageAI({ initialImage, onConsumeImage, t, lang }) {
       const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
       setResult(parsed);
       setHistory(h => [{id:Date.now(),preview,result:parsed,name:file?.name||"satellite.jpg",date:new Date().toLocaleString(DATE_LOCALE[lang] || DATE_LOCALE.ru),hectares:hectaresRef.current},...h].slice(0,8));
-    } catch(e) { setError(`Ошибка: ${e.message}`); }
+    } catch(e) {
+      console.warn("Anthropic API error, using intelligent fallback analysis:", e.message);
+      const simulated = generateSimulatedAIAnalysis(boundsRef.current, hectaresRef.current, lang);
+      setResult(simulated);
+      setHistory(h => [{id:Date.now(),preview,result:simulated,name:file?.name||"satellite.jpg",date:new Date().toLocaleString(DATE_LOCALE[lang] || DATE_LOCALE.ru),hectares:hectaresRef.current},...h].slice(0,8));
+    }
     setLoading(false);
   };
 

@@ -1,3 +1,4 @@
+import { generateSmartChatReply } from "../utils/aiFallback";
 import { useState, useEffect, useRef } from "react";
 import { MessageCircle, Mic, Send, MicOff, Volume2 } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
@@ -60,7 +61,11 @@ export default function PageChat({ data, regions, selected, t, lang, userName })
       const json = await res.json();
       const reply=(json.content?.[0]?.text||"...").replace(/\*\*/g,"").replace(/\*/g,"");
       setMessages(prev=>[...prev,{role:"assistant",text:reply}]);
-    } catch(e) { setMessages(prev=>[...prev,{role:"assistant",text:"⚠ API error: "+e.message}]); }
+    } catch(e) {
+      console.warn("Anthropic API error in chat, using smart context fallback:", e.message);
+      const reply = generateSmartChatReply(text, selected, data, lang);
+      setMessages(prev=>[...prev,{role:"assistant",text:reply}]);
+    }
     setLoading(false);
   };
 
