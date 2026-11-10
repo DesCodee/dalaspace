@@ -1,4 +1,5 @@
 // Anthropic API configuration
+// Set VITE_ANTHROPIC_KEY in your .env file or Vercel Environment Variables
 export const API_KEY = import.meta.env.VITE_ANTHROPIC_KEY || "";
 
 export const AI_MODELS = [
